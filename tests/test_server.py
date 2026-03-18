@@ -47,3 +47,35 @@ def test_expire_and_ttl_work_with_storage():
 
     assert server.handle_request("GET a") == "nil"
     assert server.handle_request("TTL a") == "-2"
+
+
+def test_resp_ping_serializes_as_simple_string():
+    server = MiniRedisServer(storage=Storage())
+
+    payload = server._serialize_response("resp", "simple", "PONG")
+
+    assert payload == b"+PONG\r\n"
+
+
+def test_resp_get_missing_key_serializes_as_null_bulk_string():
+    server = MiniRedisServer(storage=Storage())
+
+    payload = server._serialize_response("resp", "bulk", None)
+
+    assert payload == b"$-1\r\n"
+
+
+def test_resp_del_serializes_as_integer():
+    server = MiniRedisServer(storage=Storage())
+
+    response_type, response_value = server.execute_command("DEL", ["missing"])
+
+    assert server._serialize_response("resp", response_type, response_value) == b":0\r\n"
+
+
+def test_resp_ttl_serializes_as_integer():
+    server = MiniRedisServer(storage=Storage())
+
+    response_type, response_value = server.execute_command("TTL", ["missing"])
+
+    assert server._serialize_response("resp", response_type, response_value) == b":-2\r\n"

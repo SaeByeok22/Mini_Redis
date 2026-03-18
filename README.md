@@ -1,45 +1,8 @@
-# 미니 Redis 서버
+# Mini Redis
 
-## 개요
+Python으로 만든 작은 Redis 스타일 TCP key-value 서버다.
 
-이 프로젝트는 Python으로 동작하는 mini Redis 스타일의 TCP key-value 서버다.
-
-- `storage.py`: key-value 저장과 TTL 관리
-- `parser.py`: 문자열 명령 파싱과 인자 검증
-- `server.py`: TCP 연결 수락, parser 호출, storage 호출, 응답 전송
-
-## 현재 구현 파일
-
-```text
-mini-redis/
-├── storage.py
-├── server.py
-├── parser.py
-├── tests/
-└── README.md
-```
-
-## parser.py 설명
-
-`parse_command(raw_command)`는 문자열 명령을 받아 `(command, args)` 형태로 반환한다.
-
-처리 규칙:
-
-- 앞뒤 공백 제거
-- 공백 기준 분리
-- 명령어를 대문자로 통일
-- 지원하지 않는 명령어면 `ParseError`
-- 인자 개수가 맞지 않으면 `ParseError`
-
-예시:
-
-```python
-parse_command("PING")      # ("PING", [])
-parse_command("SET a 1")   # ("SET", ["a", "1"])
-parse_command(" del a ")   # ("DEL", ["a"])
-```
-
-지원 명령:
+## 지원 기능
 
 - `PING`
 - `SET key value`
@@ -48,70 +11,37 @@ parse_command(" del a ")   # ("DEL", ["a"])
 - `EXPIRE key seconds`
 - `TTL key`
 
-MVP 필수 명령은 `PING`, `SET`, `GET`, `DEL`이다.
+## 파일 역할
 
-## server.py 설명
+- `storage.py`: 데이터 저장, 삭제, TTL 처리
+- `parser.py`: inline 명령과 RESP 명령 파싱
+- `server.py`: TCP 서버 실행, 요청 처리, 응답 전송
+- `client.py`: RESP 방식으로 서버에 명령 전송
+- `tests/`: storage, parser, server 테스트
 
-`MiniRedisServer`는 한 줄 단위 문자열 프로토콜로 동작하는 TCP 서버다.
+## 실행
 
-흐름은 아래와 같다.
+가상환경이 있으면 먼저 활성화한다.
 
-1. 클라이언트 연결 수락
-2. 한 줄 읽기
-3. `parse_command()` 호출
-4. command에 따라 storage 메서드 호출
-5. 결과를 문자열로 변환해서 응답
-
-응답 규칙:
-
-- `PING` -> `PONG`
-- `SET` -> storage의 반환값 그대로 사용 (`OK` 예상)
-- `GET` -> 값이 있으면 값, 없으면 `nil`
-- `DEL` -> 성공 시 `1`, 실패 시 `0`
-- 잘못된 명령 -> `ERROR ...`
-
-선택 기능:
-
-- `EXPIRE` -> 성공 시 `1`, 실패 시 `0`
-- `TTL` -> 정수 문자열 반환
-
-`EXPIRE`, `TTL`은 `storage.py`에 해당 메서드가 있을 때만 동작한다.
-
-## storage.py와 연결 방식
-
-서버는 아래 인터페이스를 기대한다.
-
-```python
-class Storage:
-    def set(self, key, value) -> str: ...
-    def get(self, key) -> str | None: ...
-    def delete(self, key) -> bool: ...
+```bash
+source /Users/gang-yeong-im/JUNGLE/.venv/bin/activate
 ```
 
-선택 기능까지 붙이면 아래도 가능하다.
-
-```python
-    def expire(self, key, seconds) -> bool: ...
-    def ttl(self, key) -> int: ...
-```
-
-## 실행 방법
-
-`server.py`는 기본적으로 `storage.py`의 `Storage` 클래스를 사용한다.
-
-예시:
+프로젝트 의존성 설치:
 
 ```bash
 cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
-python3 server.py
+python -m pip install -r requirements.txt
 ```
 
-기본 주소:
+서버 실행:
 
-- host: `127.0.0.1`
-- port: `6380`
+```bash
+cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
+python server.py
+```
 
-서버를 실행하면 아래처럼 대기 상태가 된다.
+정상 실행 시:
 
 ```text
 Mini Redis server listening on 127.0.0.1:6380
@@ -121,16 +51,20 @@ Connect from another terminal: nc 127.0.0.1 6380
 중요:
 
 - `server.py`를 실행한 터미널에 `PING`를 직접 치는 방식은 동작하지 않는다.
-- 그 터미널은 서버 대기용이다.
+- 서버는 TCP 연결만 기다린다.
 - 명령은 반드시 다른 터미널에서 보내야 한다.
 
-예시:
+## 확인 방법
+
+### 1. 가장 쉬운 방법: `nc`
+
+다른 터미널에서:
 
 ```bash
 nc 127.0.0.1 6380
 ```
 
-그 다음 아래처럼 한 줄씩 입력해서 응답을 확인한다.
+입력:
 
 ```text
 PING
@@ -150,20 +84,35 @@ OK
 nil
 ```
 
-TTL 예시:
+이 방식은 사람이 직접 확인하기 쉬운 inline 문자열 모드다.
 
-```text
-SET b 2
-EXPIRE b 3
-TTL b
-GET b
+### 2. RESP 방식 확인
+
+`client.py`를 쓰면 `redis-cli` 없이도 RESP로 바로 확인할 수 있다.
+
+```bash
+python client.py PING
+python client.py SET a 1
+python client.py GET a
+python client.py DEL a
+python client.py TTL a
 ```
 
-## 서버 종료 방법
+서버는 RESP 요청을 읽고 RESP 형식으로 응답한다.
 
-서버를 띄운 첫 번째 터미널에서 `Ctrl+C`를 누르면 서버가 종료된다.
+포트를 바꾸고 싶으면:
 
-정상 종료되면 아래 메시지가 보인다.
+```bash
+python client.py --port 6380 PING
+```
+
+`nc`는 inline 모드 확인용이고, `client.py`는 RESP 확인용이다.
+
+## 서버 종료
+
+서버를 실행한 터미널에서 `Control + C`
+
+정상 종료 시:
 
 ```text
 Mini Redis server stopped.
@@ -171,22 +120,44 @@ Mini Redis server stopped.
 
 주의:
 
-- 두 번째 터미널의 `nc`에서 `Ctrl+C`를 누르면 클라이언트만 종료된다.
-- 서버까지 끄려면 반드시 첫 번째 터미널에서 `Ctrl+C`를 눌러야 한다.
-- `nc` 연결만 닫고 싶으면 두 번째 터미널에서 `Ctrl+C` 또는 `Ctrl+D`를 사용하면 된다.
+- `Command + C`는 macOS 터미널 복사 단축키라서 서버 종료 신호가 아니다.
+- 클라이언트 터미널에서 `Control + C`를 누르면 클라이언트만 닫힌다.
 
-즉:
+## 테스트
 
-- 첫 번째 터미널: `python3 server.py` 실행
-- 두 번째 터미널: `nc 127.0.0.1 6380`로 명령 입력
-- 클라이언트 종료: 두 번째 터미널에서 `Ctrl+C` 또는 `Ctrl+D`
-- 서버 종료: 첫 번째 터미널에서 `Ctrl+C`
+```bash
+cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
+python -m pip install -r requirements.txt
+python -m pytest -q
+```
+
+## Homebrew와 redis-cli
+
+macOS에서 `redis-cli`를 쓰려면 보통 Homebrew가 필요하다.
+
+공식 Homebrew 설치 명령:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+설치 후:
+
+```bash
+brew install redis
+```
+
+주의:
+
+- Apple Silicon Mac에서는 기본 설치 위치가 `/opt/homebrew`다.
+- 이 경로 설치에는 macOS 관리자 권한이 필요할 수 있다.
+- 관리자 권한이 없으면 Homebrew 설치가 실패할 수 있다.
 
 ## 자주 나오는 상황
 
 ### `ERROR port 6380 is already in use.`
 
-이미 다른 서버가 `127.0.0.1:6380`을 쓰고 있다는 뜻이다.
+이미 다른 프로세스가 6380 포트를 쓰는 중이다.
 
 확인:
 
@@ -194,31 +165,11 @@ Mini Redis server stopped.
 lsof -nP -iTCP:6380 -sTCP:LISTEN
 ```
 
-기존 서버를 종료한 뒤 다시 `python3 server.py`를 실행하면 된다.
+기존 프로세스를 종료한 뒤 다시 실행하면 된다.
 
-### `python3 storage.py`를 실행했는데 아무 일도 없음
+### `python storage.py`를 실행했는데 아무 반응이 없음
 
-정상이다. `storage.py`는 저장소 클래스만 정의한 파일이라서 직접 실행하는 용도가 아니다.
+정상이다.
 
-실행해야 하는 파일은 아래 둘 중 하나다.
-
-- 서버 실행: `python3 server.py`
-- 테스트 실행: `python3 -m pytest -q`
-
-## 설계 포인트
-
-- parser와 server 역할을 분리했다.
-- server 안에 저장 로직을 넣지 않았다.
-- parser 예외를 server에서 `ERROR ...` 응답으로 바꿨다.
-- 지금은 단순한 구조를 위해 순차 처리 서버로 구현했다.
-
-## 현재 한계
-
-- 멀티 클라이언트 처리는 아직 넣지 않았다.
-- RESP 프로토콜은 아직 지원하지 않는다.
-
-## 다음 단계
-
-- `feature/storage` 브랜치와 머지
-- `PING / SET / GET / DEL` 실서버 동작 확인
-- 이후 여유가 있으면 `EXPIRE / TTL` 연결
+- `storage.py`는 실행 파일이 아니라 클래스 정의 파일이다.
+- 실제 실행 파일은 `server.py`다.

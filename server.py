@@ -6,7 +6,7 @@ import errno
 import socket
 from typing import Protocol
 
-from parser import ParseError, parse_command
+from parser import ParseError, ProtocolType, parse_command, read_request
 
 
 class StorageProtocol(Protocol):
@@ -50,13 +50,21 @@ class MiniRedisServer:
     def _handle_client(self, client_socket: socket.socket) -> None:
         with client_socket.makefile("rwb") as client_file:
             while True:
-                raw_line = client_file.readline()
-                if not raw_line:
+                try:
+                    parsed_request = read_request(client_file)
+                except ParseError as exc:
+                    client_file.write(self._serialize_error(str(exc), "inline"))
+                    client_file.flush()
+                    continue
+
+                if parsed_request is None:
                     break
 
-                request = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-                response = self.handle_request(request)
-                client_file.write(f"{response}\n".encode("utf-8"))
+                protocol, command, args = parsed_request
+                response_type, response_value = self.execute_command(command, args)
+                client_file.write(
+                    self._serialize_response(protocol, response_type, response_value)
+                )
                 client_file.flush()
 
     def handle_request(self, request: str) -> str:
@@ -66,20 +74,24 @@ class MiniRedisServer:
         except ParseError as exc:
             return f"ERROR {exc}"
 
+        response_type, response_value = self.execute_command(command, args)
+        return self._format_inline_response(response_type, response_value)
+
+    def execute_command(self, command: str, args: list[str]) -> tuple[str, str | int | None]:
+        """Execute one already-parsed command and return a typed response."""
         if command == "PING":
-            return "PONG"
+            return "simple", "PONG"
 
         if command == "SET":
             key, value = args
-            return self.storage.set(key, value)
+            return "simple", self.storage.set(key, value)
 
         if command == "GET":
-            value = self.storage.get(args[0])
-            return value if value is not None else "nil"
+            return "bulk", self.storage.get(args[0])
 
         if command == "DEL":
             deleted = self.storage.delete(args[0])
-            return "1" if deleted else "0"
+            return "integer", 1 if deleted else 0
 
         if command == "EXPIRE":
             return self._handle_expire(args)
@@ -87,30 +99,74 @@ class MiniRedisServer:
         if command == "TTL":
             return self._handle_ttl(args)
 
-        return f"ERROR unsupported command: {command}"
+        return "error", f"unsupported command: {command}"
 
-    def _handle_expire(self, args: list[str]) -> str:
+    def _handle_expire(self, args: list[str]) -> tuple[str, str | int]:
         if not hasattr(self.storage, "expire"):
-            return "ERROR EXPIRE not supported"
+            return "error", "EXPIRE not supported"
 
         key, seconds_text = args
         try:
             seconds = int(seconds_text)
         except ValueError:
-            return "ERROR EXPIRE seconds must be an integer"
+            return "error", "EXPIRE seconds must be an integer"
 
         if seconds < 0:
-            return "ERROR EXPIRE seconds must be non-negative"
+            return "error", "EXPIRE seconds must be non-negative"
 
         expired = self.storage.expire(key, seconds)  # type: ignore[attr-defined]
-        return "1" if expired else "0"
+        return "integer", 1 if expired else 0
 
-    def _handle_ttl(self, args: list[str]) -> str:
+    def _handle_ttl(self, args: list[str]) -> tuple[str, int | str]:
         if not hasattr(self.storage, "ttl"):
-            return "ERROR TTL not supported"
+            return "error", "TTL not supported"
 
         ttl_value = self.storage.ttl(args[0])  # type: ignore[attr-defined]
-        return str(ttl_value)
+        return "integer", ttl_value
+
+    def _format_inline_response(self, response_type: str, response_value: str | int | None) -> str:
+        if response_type == "simple":
+            return str(response_value)
+
+        if response_type == "bulk":
+            return str(response_value) if response_value is not None else "nil"
+
+        if response_type == "integer":
+            return str(response_value)
+
+        return f"ERROR {response_value}"
+
+    def _serialize_response(
+        self,
+        protocol: ProtocolType,
+        response_type: str,
+        response_value: str | int | None,
+    ) -> bytes:
+        if protocol == "inline":
+            return f"{self._format_inline_response(response_type, response_value)}\n".encode(
+                "utf-8"
+            )
+
+        if response_type == "simple":
+            return f"+{response_value}\r\n".encode("utf-8")
+
+        if response_type == "bulk":
+            if response_value is None:
+                return b"$-1\r\n"
+
+            bulk_value = str(response_value)
+            return f"${len(bulk_value.encode('utf-8'))}\r\n{bulk_value}\r\n".encode("utf-8")
+
+        if response_type == "integer":
+            return f":{response_value}\r\n".encode("utf-8")
+
+        return self._serialize_error(str(response_value), protocol)
+
+    def _serialize_error(self, message: str, protocol: ProtocolType) -> bytes:
+        if protocol == "resp":
+            return f"-ERROR {message}\r\n".encode("utf-8")
+
+        return f"ERROR {message}\n".encode("utf-8")
 
 
 def create_default_server(host: str = "127.0.0.1", port: int = 6380) -> MiniRedisServer:
