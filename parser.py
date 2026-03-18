@@ -16,6 +16,10 @@ COMMAND_SPECS: dict[str, int] = {
     "DEL": 1,
     "EXPIRE": 2,
     "TTL": 1,
+    "PERSIST": 1,
+    "EXISTS": 1,
+    "FLUSH": 0,
+    "KEYS": 0,
 }
 
 

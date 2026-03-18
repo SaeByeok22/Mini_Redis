@@ -21,6 +21,18 @@ class StorageProtocol(Protocol):
     def delete(self, key: str) -> bool:
         ...
 
+    def persist(self, key: str) -> bool:
+        ...
+
+    def exists(self, key: str) -> bool:
+        ...
+
+    def flush(self) -> None:
+        ...
+
+    def keys(self) -> list[str]:
+        ...
+
 
 class MiniRedisServer:
     """A small line-based TCP server that dispatches commands to storage."""
@@ -98,6 +110,21 @@ class MiniRedisServer:
 
         if command == "TTL":
             return self._handle_ttl(args)
+
+        if command == "PERSIST":
+            persisted = self.storage.persist(args[0])
+            return "integer", 1 if persisted else 0
+
+        if command == "EXISTS":
+            exists = self.storage.exists(args[0])
+            return "integer", 1 if exists else 0
+
+        if command == "FLUSH":
+            self.storage.flush()
+            return "simple", "OK"
+
+        if command == "KEYS":
+            return "bulk", " ".join(self.storage.keys())
 
         return "error", f"unsupported command: {command}"
 

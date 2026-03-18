@@ -49,6 +49,30 @@ def test_expire_and_ttl_work_with_storage():
     assert server.handle_request("TTL a") == "-2"
 
 
+def test_persist_exists_flush_and_keys_work_with_storage():
+    current_time = 100.0
+
+    def fake_time() -> float:
+        return current_time
+
+    server = MiniRedisServer(storage=Storage(time_func=fake_time))
+
+    assert server.handle_request("SET a 1") == "OK"
+    assert server.handle_request("SET b 2") == "OK"
+    assert server.handle_request("EXPIRE a 3") == "1"
+    assert server.handle_request("EXISTS a") == "1"
+    assert server.handle_request("PERSIST a") == "1"
+    assert server.handle_request("TTL a") == "-1"
+    assert server.handle_request("KEYS") == "a b"
+
+    current_time = 104.0
+
+    assert server.handle_request("KEYS") == "a b"
+    assert server.handle_request("FLUSH") == "OK"
+    assert server.handle_request("KEYS") == ""
+    assert server.handle_request("EXISTS a") == "0"
+
+
 def test_resp_ping_serializes_as_simple_string():
     server = MiniRedisServer(storage=Storage())
 

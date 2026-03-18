@@ -59,6 +59,35 @@ Returns TTL using Redis-style integer rules:
 
 Before calculating TTL, expired keys are removed automatically.
 
+### `persist(key) -> bool`
+
+- Removes the TTL from an existing key
+- Keeps the stored value unchanged
+- Returns `True` if the key exists and had a TTL
+- Returns `False` if the key does not exist or has no TTL
+
+### `exists(key) -> bool`
+
+- Checks whether the key is still alive
+- Removes the key first if it has already expired
+- Returns `True` only for live keys
+
+### `flush() -> None`
+
+- Clears all stored values
+- Clears all TTL metadata
+
+### `cleanup_expired() -> int`
+
+- Scans all keys that have TTL metadata
+- Removes only the keys that are already expired
+- Returns the number of removed keys
+
+### `keys() -> list[str]`
+
+- Cleans expired keys first
+- Returns only currently live keys
+
 ## Expiration Flow
 
 Expiration handling is centered around `_purge_if_expired(key)`.
@@ -72,9 +101,25 @@ This helper:
 This helper is called by:
 
 - `get()`
+- `exists()`
 - `delete()`
 - `expire()`
 - `ttl()`
+- `persist()`
+
+There is also a batch cleanup path through `cleanup_expired()`.
+
+That method:
+
+- loops over `self._expires_at`
+- uses `_is_expired(key)` to decide whether each key is stale
+- removes expired keys with `_delete_key(key)`
+- returns how many keys were removed
+
+Two internal helpers support this:
+
+- `_is_expired(key)`: checks whether a key's expiration time is past
+- `_delete_key(key)`: removes a key from both `self._data` and `self._expires_at`
 
 ## Test-Friendly Design
 
@@ -92,4 +137,5 @@ This makes TTL behavior easy to test without waiting in real time.
 - Simple structure
 - TTL stored separately from values
 - Expired keys are cleaned lazily on access
+- Expired keys can also be cleaned in batch with `cleanup_expired()`
 - Easy to extend with more Redis-like commands later

@@ -33,6 +33,34 @@ def test_parse_del_command():
     assert args == ["a"]
 
 
+def test_parse_persist_command():
+    command, args = parse_command("PERSIST a")
+
+    assert command == "PERSIST"
+    assert args == ["a"]
+
+
+def test_parse_exists_command():
+    command, args = parse_command("EXISTS a")
+
+    assert command == "EXISTS"
+    assert args == ["a"]
+
+
+def test_parse_flush_command():
+    command, args = parse_command("FLUSH")
+
+    assert command == "FLUSH"
+    assert args == []
+
+
+def test_parse_keys_command():
+    command, args = parse_command("KEYS")
+
+    assert command == "KEYS"
+    assert args == []
+
+
 def test_parse_command_ignores_extra_spaces():
     command, args = parse_command("  SET   a   1  ")
 
