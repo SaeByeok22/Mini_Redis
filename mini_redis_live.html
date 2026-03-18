@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini Redis Live Demo</title>
+  <style>
+    :root {
+      --bg: #f2ede2;
+      --panel: #fffaf0;
+      --panel-strong: #fff6dc;
+      --text: #18212c;
+      --muted: #5f6873;
+      --line: #d8cdb7;
+      --accent: #d74f2a;
+      --accent-dark: #8f2f18;
+      --success: #1f7a53;
+      --danger: #a4372a;
+      --terminal: #131722;
+      --terminal-text: #edf2f7;
+      --shadow: 0 18px 40px rgba(29, 26, 19, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(215, 79, 42, 0.18), transparent 28%),
+        linear-gradient(180deg, #f6f1e7 0%, var(--bg) 100%);
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 20px;
+      align-items: stretch;
+      margin-bottom: 22px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(216, 205, 183, 0.85);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    .hero-copy {
+      background:
+        linear-gradient(135deg, rgba(255, 246, 220, 0.96), rgba(255, 250, 240, 0.92)),
+        #fff;
+    }
+
+    .hero-copy h1 {
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      line-height: 1;
+      margin-bottom: 14px;
+      letter-spacing: -0.03em;
+    }
+
+    .hero-copy p {
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 60ch;
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 22px;
+    }
+
+    .status-pill {
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(216, 205, 183, 0.9);
+    }
+
+    .status-pill strong {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .status-value {
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .notes {
+      background: linear-gradient(180deg, rgba(255, 246, 220, 0.85), rgba(255, 250, 240, 0.92));
+    }
+
+    .notes ul {
+      padding-left: 20px;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .layout {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 1.35rem;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+
+    .button-row,
+    .command-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 16px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 120ms ease, background 120ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      background: var(--accent-dark);
+    }
+
+    button.secondary {
+      background: #2d6c94;
+    }
+
+    button.secondary:hover {
+      background: #215272;
+    }
+
+    button.ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+
+    button.ghost:hover {
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .command-input {
+      flex: 1 1 340px;
+      min-width: 240px;
+    }
+
+    .terminal {
+      background: var(--terminal);
+      color: var(--terminal-text);
+      border-radius: 20px;
+      padding: 18px;
+      min-height: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      color: #b6c4d6;
+      font-size: 0.92rem;
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ff715f;
+      box-shadow: 16px 0 0 #fdbc40, 32px 0 0 #34c748;
+      margin-right: 26px;
+    }
+
+    #log {
+      margin: 0;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow: auto;
+      flex: 1;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 14px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric {
+      padding: 16px;
+      border-radius: 18px;
+      background: var(--panel-strong);
+      border: 1px solid rgba(216, 205, 183, 0.9);
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .metric span {
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+
+    .benchmark-summary {
+      margin-top: 18px;
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(31, 122, 83, 0.1);
+      border: 1px solid rgba(31, 122, 83, 0.25);
+    }
+
+    .summary-strong {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: var(--success);
+      margin-bottom: 6px;
+    }
+
+    .footer-note {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.6;
+    }
+
+    .danger {
+      color: var(--danger);
+    }
+
+    .success {
+      color: var(--success);
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .form-grid,
+      .metrics,
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <article class="card hero-copy">
+        <h1>Mini Redis Live Demo</h1>
+        <p>
+          이 페이지는 WebSocket 브리지를 통해 실제 Mini Redis 명령을 호출합니다.
+          위쪽은 저장, 조회, 삭제, TTL 같은 실제 기능 확인용이고, 아래쪽은 file-backed source DB를 원본으로 둔 뒤
+          Mini Redis를 cache로 사용할 때의 응답 속도 차이를 실제 측정합니다.
+        </p>
+        <div class="status-grid">
+          <div class="status-pill">
+            <strong>Bridge</strong>
+            <div class="status-value" id="bridge-status">connecting...</div>
+          </div>
+          <div class="status-pill">
+            <strong>WebSocket</strong>
+            <div class="status-value" id="socket-status">not connected</div>
+          </div>
+          <div class="status-pill">
+            <strong>Last Command</strong>
+            <div class="status-value" id="last-command">-</div>
+          </div>
+          <div class="status-pill">
+            <strong>Last Response</strong>
+            <div class="status-value" id="last-response">-</div>
+          </div>
+        </div>
+      </article>
+
+      <aside class="card notes">
+        <div class="section-title">
+          <h2>사용 포인트</h2>
+        </div>
+        <ul>
+          <li>이 페이지는 <code>ws://.../ws</code> 로 직접 연결됩니다.</li>
+          <li>명령은 현재 parser 제약상 공백 기준으로 분리되므로, value에는 공백을 넣지 않는 것이 안전합니다.</li>
+          <li>benchmark는 실제 source DB 조회와 Mini Redis cache 조회를 모두 실행합니다.</li>
+          <li>cache miss 시 source DB에서 읽고 Mini Redis에 저장한 뒤, 이후 요청은 cache hit로 처리합니다.</li>
+        </ul>
+      </aside>
+    </section>
+
+    <section class="layout">
+      <article class="card">
+        <div class="section-title">
+          <h2>실제 명령 호출</h2>
+          <span class="subtle">SET / GET / DEL / EXPIRE / TTL / PERSIST / EXISTS / KEYS / FLUSH</span>
+        </div>
+
+        <div class="form-grid">
+          <div>
+            <label for="key-input">Key</label>
+            <input id="key-input" value="user:1">
+          </div>
+          <div>
+            <label for="value-input">Value</label>
+            <input id="value-input" value="kim">
+          </div>
+          <div>
+            <label for="ttl-input">TTL seconds</label>
+            <input id="ttl-input" type="number" min="0" value="10">
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button data-command="set">SET</button>
+          <button data-command="get">GET</button>
+          <button data-command="del">DEL</button>
+          <button data-command="expire">EXPIRE</button>
+          <button data-command="ttl">TTL</button>
+          <button data-command="persist">PERSIST</button>
+          <button data-command="exists">EXISTS</button>
+          <button data-command="keys">KEYS</button>
+          <button data-command="flush" class="secondary">FLUSH</button>
+        </div>
+
+        <div class="command-row">
+          <input id="raw-command" class="command-input" value="SET user:1 kim">
+          <button id="send-raw">Send Raw Command</button>
+          <button id="run-smoke" class="ghost">Run Smoke Scenario</button>
+        </div>
+
+        <p class="hint">
+          Smoke scenario: <code>FLUSH → SET demo hello → GET demo → EXISTS demo → DEL demo → GET demo</code>
+        </p>
+
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot"></span>
+            <span>live command log</span>
+          </div>
+          <pre id="log">Waiting for bridge connection...</pre>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="section-title">
+          <h2>Cache Benchmark</h2>
+          <span class="subtle">Source DB vs Source DB + Mini Redis cache</span>
+        </div>
+
+        <div class="form-grid">
+          <div>
+            <label for="benchmark-key">Source key</label>
+            <select id="benchmark-key">
+              <option value="user:1">user:1</option>
+              <option value="user:2">user:2</option>
+              <option value="product:1">product:1</option>
+              <option value="session:1">session:1</option>
+            </select>
+          </div>
+          <div>
+            <label for="benchmark-iterations">Iterations</label>
+            <input id="benchmark-iterations" type="number" min="1" value="50">
+          </div>
+          <div>
+            <label for="benchmark-delay">Source DB delay (ms)</label>
+            <input id="benchmark-delay" type="number" min="0" value="20">
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button id="run-benchmark">Run Benchmark</button>
+          <button id="load-samples" class="ghost">Reload Sample Keys</button>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <strong>No Cache Avg</strong>
+            <span id="metric-no-cache">-</span>
+          </div>
+          <div class="metric">
+            <strong>With Cache Avg</strong>
+            <span id="metric-with-cache">-</span>
+          </div>
+          <div class="metric">
+            <strong>Cache Hit Rate</strong>
+            <span id="metric-hit-rate">-</span>
+          </div>
+          <div class="metric">
+            <strong>Speedup</strong>
+            <span id="metric-speedup">-</span>
+          </div>
+        </div>
+
+        <div class="benchmark-summary">
+          <div class="summary-strong" id="benchmark-summary">Benchmark not started yet.</div>
+          <div id="benchmark-detail" class="subtle">
+            Run the benchmark to compare direct source-DB reads against cache-assisted reads.
+          </div>
+        </div>
+
+        <p class="footer-note">
+          측정 방식: no-cache는 매 요청마다 source DB를 조회합니다. with-cache는 첫 요청만 source DB를 조회하고,
+          이후에는 Mini Redis의 <code>GET cache:&lt;key&gt;</code> 응답을 사용합니다.
+        </p>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const bridgeStatus = document.getElementById("bridge-status");
+    const socketStatus = document.getElementById("socket-status");
+    const lastCommand = document.getElementById("last-command");
+    const lastResponse = document.getElementById("last-response");
+    const log = document.getElementById("log");
+
+    const keyInput = document.getElementById("key-input");
+    const valueInput = document.getElementById("value-input");
+    const ttlInput = document.getElementById("ttl-input");
+    const rawCommandInput = document.getElementById("raw-command");
+
+    const benchmarkKey = document.getElementById("benchmark-key");
+    const benchmarkIterations = document.getElementById("benchmark-iterations");
+    const benchmarkDelay = document.getElementById("benchmark-delay");
+
+    const metricNoCache = document.getElementById("metric-no-cache");
+    const metricWithCache = document.getElementById("metric-with-cache");
+    const metricHitRate = document.getElementById("metric-hit-rate");
+    const metricSpeedup = document.getElementById("metric-speedup");
+    const benchmarkSummary = document.getElementById("benchmark-summary");
+    const benchmarkDetail = document.getElementById("benchmark-detail");
+
+    let socket = null;
+    let pending = [];
+
+    function websocketUrl() {
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${location.host}/ws`;
+    }
+
+    function appendLog(line, type = "normal") {
+      const prefix = type === "error" ? "[error] " : type === "success" ? "[ok] " : "";
+      const content = log.textContent.trim() === "Waiting for bridge connection..."
+        ? ""
+        : `${log.textContent}\n`;
+      log.textContent = `${content}${prefix}${line}`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setConnectionState(connected) {
+      bridgeStatus.textContent = connected ? "ready" : "down";
+      bridgeStatus.className = connected ? "status-value success" : "status-value danger";
+      socketStatus.textContent = connected ? "connected" : "disconnected";
+      socketStatus.className = connected ? "status-value success" : "status-value danger";
+    }
+
+    function connect() {
+      setConnectionState(false);
+      appendLog(`Connecting to ${websocketUrl()} ...`);
+      socket = new WebSocket(websocketUrl());
+
+      socket.addEventListener("open", () => {
+        setConnectionState(true);
+        appendLog("WebSocket connected.", "success");
+        flushPending();
+        send({ action: "samples" });
+      });
+
+      socket.addEventListener("message", (event) => {
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (error) {
+          appendLog(`Invalid JSON from bridge: ${event.data}`, "error");
+          return;
+        }
+        handlePayload(payload);
+      });
+
+      socket.addEventListener("close", () => {
+        setConnectionState(false);
+        appendLog("Connection closed. Retrying in 1.5s...", "error");
+        window.setTimeout(connect, 1500);
+      });
+
+      socket.addEventListener("error", () => {
+        appendLog("WebSocket error.", "error");
+      });
+    }
+
+    function flushPending() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      while (pending.length > 0) {
+        socket.send(JSON.stringify(pending.shift()));
+      }
+    }
+
+    function send(payload) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        pending.push(payload);
+        return;
+      }
+      socket.send(JSON.stringify(payload));
+    }
+
+    function sendCommand(command) {
+      const trimmed = command.trim();
+      if (!trimmed) {
+        appendLog("Empty command is ignored.", "error");
+        return;
+      }
+      lastCommand.textContent = trimmed;
+      send({ action: "command", command: trimmed });
+    }
+
+    function handlePayload(payload) {
+      if (!payload.ok) {
+        const message = payload.error || "unknown error";
+        lastResponse.textContent = message;
+        appendLog(message, "error");
+        return;
+      }
+
+      if (payload.action === "command") {
+        lastResponse.textContent = payload.response;
+        const type = String(payload.response).startsWith("ERROR ") ? "error" : "success";
+        appendLog(`${payload.command} -> ${payload.response}`, type);
+        return;
+      }
+
+      if (payload.action === "benchmark") {
+        if (payload.error) {
+          benchmarkSummary.textContent = payload.error;
+          benchmarkDetail.textContent = "Choose another source key or re-seed the demo SQLite database.";
+          appendLog(`benchmark ${payload.key} -> ${payload.error}`, "error");
+          return;
+        }
+
+        metricNoCache.textContent = `${payload.no_cache_avg_ms} ms`;
+        metricWithCache.textContent = `${payload.with_cache_avg_ms} ms`;
+        metricHitRate.textContent = `${payload.cache_hit_rate}%`;
+        metricSpeedup.textContent = `${payload.speedup}x`;
+        benchmarkSummary.textContent = `${payload.key}: ${payload.speedup}x faster with Mini Redis cache`;
+        benchmarkDetail.textContent =
+          `No cache total ${payload.no_cache_total_ms} ms, with cache total ${payload.with_cache_total_ms} ms, ` +
+          `${payload.cache_hits} hit(s), ${payload.cache_misses} miss(es), source value "${payload.source_value}".`;
+        appendLog(
+          `benchmark ${payload.key} iterations=${payload.iterations} delay=${payload.db_delay_ms}ms ` +
+          `-> no-cache ${payload.no_cache_avg_ms}ms avg / with-cache ${payload.with_cache_avg_ms}ms avg`,
+          "success"
+        );
+        return;
+      }
+
+      if (payload.action === "samples" && Array.isArray(payload.keys)) {
+        benchmarkKey.innerHTML = "";
+        for (const key of payload.keys) {
+          const option = document.createElement("option");
+          option.value = key;
+          option.textContent = key;
+          benchmarkKey.appendChild(option);
+        }
+        appendLog(`Loaded ${payload.keys.length} sample benchmark keys.`, "success");
+      }
+    }
+
+    function commandFromPreset(type) {
+      const key = keyInput.value.trim();
+      const value = valueInput.value.trim();
+      const ttl = ttlInput.value.trim();
+
+      if (type === "set") {
+        return `SET ${key} ${value}`;
+      }
+      if (type === "get") {
+        return `GET ${key}`;
+      }
+      if (type === "del") {
+        return `DEL ${key}`;
+      }
+      if (type === "expire") {
+        return `EXPIRE ${key} ${ttl}`;
+      }
+      if (type === "ttl") {
+        return `TTL ${key}`;
+      }
+      if (type === "persist") {
+        return `PERSIST ${key}`;
+      }
+      if (type === "exists") {
+        return `EXISTS ${key}`;
+      }
+      if (type === "keys") {
+        return "KEYS";
+      }
+      if (type === "flush") {
+        return "FLUSH";
+      }
+      return "";
+    }
+
+    async function runSmokeScenario() {
+      const commands = [
+        "FLUSH",
+        "SET demo hello",
+        "GET demo",
+        "EXISTS demo",
+        "DEL demo",
+        "GET demo"
+      ];
+      for (const command of commands) {
+        sendCommand(command);
+        await new Promise((resolve) => window.setTimeout(resolve, 180));
+      }
+    }
+
+    for (const button of document.querySelectorAll("[data-command]")) {
+      button.addEventListener("click", () => {
+        sendCommand(commandFromPreset(button.dataset.command));
+      });
+    }
+
+    document.getElementById("send-raw").addEventListener("click", () => {
+      sendCommand(rawCommandInput.value);
+    });
+
+    rawCommandInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        sendCommand(rawCommandInput.value);
+      }
+    });
+
+    document.getElementById("run-smoke").addEventListener("click", () => {
+      runSmokeScenario();
+    });
+
+    document.getElementById("run-benchmark").addEventListener("click", () => {
+      send({
+        action: "benchmark",
+        key: benchmarkKey.value,
+        iterations: Number(benchmarkIterations.value || 50),
+        db_delay_ms: Number(benchmarkDelay.value || 20)
+      });
+    });
+
+    document.getElementById("load-samples").addEventListener("click", () => {
+      send({ action: "samples" });
+    });
+
+    connect();
+  </script>
+</body>
+</html>
