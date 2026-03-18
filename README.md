@@ -1,20 +1,21 @@
-# 미니 Redis 서버: parser + server 정리
+# 미니 Redis 서버
 
 ## 개요
 
-이 브랜치는 2번 팀원 작업 기준으로 `parser.py`와 `server.py`를 구현한 상태다.
+이 프로젝트는 Python으로 동작하는 mini Redis 스타일의 TCP key-value 서버다.
 
-- `parser.py`: 클라이언트가 보낸 문자열 명령을 해석한다.
-- `server.py`: TCP 연결을 받고, parser 결과를 storage 호출로 연결한 뒤 응답을 돌려준다.
-
-저장 로직은 일부러 `server.py` 안에 넣지 않았다. 실제 데이터 저장은 `storage.py`의 `Storage` 클래스가 담당해야 한다.
+- `storage.py`: key-value 저장과 TTL 관리
+- `parser.py`: 문자열 명령 파싱과 인자 검증
+- `server.py`: TCP 연결 수락, parser 호출, storage 호출, 응답 전송
 
 ## 현재 구현 파일
 
 ```text
 mini-redis/
+├── storage.py
 ├── server.py
 ├── parser.py
+├── tests/
 └── README.md
 ```
 
@@ -94,17 +95,14 @@ class Storage:
     def ttl(self, key) -> int: ...
 ```
 
-즉, 1번 팀원의 `storage.py`가 머지되면 바로 연결할 수 있게 구성했다.
-
 ## 실행 방법
 
-`server.py`는 기본적으로 `storage.py`에서 `Storage` 클래스를 가져오도록 되어 있다.
-
-따라서 실제 서버 실행은 `storage.py`가 있어야 가능하다.
+`server.py`는 기본적으로 `storage.py`의 `Storage` 클래스를 사용한다.
 
 예시:
 
 ```bash
+cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
 python3 server.py
 ```
 
@@ -112,6 +110,100 @@ python3 server.py
 
 - host: `127.0.0.1`
 - port: `6380`
+
+서버를 실행하면 아래처럼 대기 상태가 된다.
+
+```text
+Mini Redis server listening on 127.0.0.1:6380
+Connect from another terminal: nc 127.0.0.1 6380
+```
+
+중요:
+
+- `server.py`를 실행한 터미널에 `PING`를 직접 치는 방식은 동작하지 않는다.
+- 그 터미널은 서버 대기용이다.
+- 명령은 반드시 다른 터미널에서 보내야 한다.
+
+예시:
+
+```bash
+nc 127.0.0.1 6380
+```
+
+그 다음 아래처럼 한 줄씩 입력해서 응답을 확인한다.
+
+```text
+PING
+SET a 1
+GET a
+DEL a
+GET a
+```
+
+예상 응답:
+
+```text
+PONG
+OK
+1
+1
+nil
+```
+
+TTL 예시:
+
+```text
+SET b 2
+EXPIRE b 3
+TTL b
+GET b
+```
+
+## 서버 종료 방법
+
+서버를 띄운 첫 번째 터미널에서 `Ctrl+C`를 누르면 서버가 종료된다.
+
+정상 종료되면 아래 메시지가 보인다.
+
+```text
+Mini Redis server stopped.
+```
+
+주의:
+
+- 두 번째 터미널의 `nc`에서 `Ctrl+C`를 누르면 클라이언트만 종료된다.
+- 서버까지 끄려면 반드시 첫 번째 터미널에서 `Ctrl+C`를 눌러야 한다.
+- `nc` 연결만 닫고 싶으면 두 번째 터미널에서 `Ctrl+C` 또는 `Ctrl+D`를 사용하면 된다.
+
+즉:
+
+- 첫 번째 터미널: `python3 server.py` 실행
+- 두 번째 터미널: `nc 127.0.0.1 6380`로 명령 입력
+- 클라이언트 종료: 두 번째 터미널에서 `Ctrl+C` 또는 `Ctrl+D`
+- 서버 종료: 첫 번째 터미널에서 `Ctrl+C`
+
+## 자주 나오는 상황
+
+### `ERROR port 6380 is already in use.`
+
+이미 다른 서버가 `127.0.0.1:6380`을 쓰고 있다는 뜻이다.
+
+확인:
+
+```bash
+lsof -nP -iTCP:6380 -sTCP:LISTEN
+```
+
+기존 서버를 종료한 뒤 다시 `python3 server.py`를 실행하면 된다.
+
+### `python3 storage.py`를 실행했는데 아무 일도 없음
+
+정상이다. `storage.py`는 저장소 클래스만 정의한 파일이라서 직접 실행하는 용도가 아니다.
+
+실행해야 하는 파일은 아래 둘 중 하나다.
+
+- 서버 실행: `python3 server.py`
+- 테스트 실행: `python3 -m pytest -q`
 
 ## 설계 포인트
 
@@ -122,7 +214,6 @@ python3 server.py
 
 ## 현재 한계
 
-- `storage.py`가 아직 이 브랜치에는 없으면 실제 실행은 불가하다.
 - 멀티 클라이언트 처리는 아직 넣지 않았다.
 - RESP 프로토콜은 아직 지원하지 않는다.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import socket
 from typing import Protocol
 
@@ -38,6 +39,8 @@ class MiniRedisServer:
             server_socket.listen()
             self._sock = server_socket
             self.host, self.port = server_socket.getsockname()
+            print(f"Mini Redis server listening on {self.host}:{self.port}")
+            print(f"Connect from another terminal: nc {self.host} {self.port}")
 
             while True:
                 client_socket, _ = server_socket.accept()
@@ -122,8 +125,15 @@ def create_default_server(host: str = "127.0.0.1", port: int = 6380) -> MiniRedi
 
 def main() -> None:
     server = create_default_server()
-    print(f"Mini Redis server listening on {server.host}:{server.port}")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nMini Redis server stopped.")
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(f"ERROR port {server.port} is already in use.")
+            return
+        raise
 
 
 if __name__ == "__main__":
