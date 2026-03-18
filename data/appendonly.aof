@@ -1,0 +1,8 @@
+{"command": "FLUSH", "args": []}
+{"command": "SET", "args": ["demo", "hello"]}
+{"command": "DEL", "args": ["demo"]}
+{"command": "SET", "args": ["cache:user:1", "kim"]}
+{"command": "SET", "args": ["user:1", "kim"]}
+{"command": "EXPIREAT", "args": ["user:1", "373567.5646134"]}
+{"command": "PERSIST", "args": ["user:1"]}
+{"command": "FLUSH", "args": []}

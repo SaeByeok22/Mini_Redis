@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mini Redis Live Demo</title>
+  <title>Mini Redis Live</title>
   <style>
     :root {
       --bg: #f2ede2;
@@ -345,11 +345,11 @@
   <main>
     <section class="hero">
       <article class="card hero-copy">
-        <h1>Mini Redis Live Demo</h1>
+        <h1>Mini Redis Live</h1>
         <p>
           이 페이지는 WebSocket 브리지를 통해 실제 Mini Redis 명령을 호출합니다.
           위쪽은 저장, 조회, 삭제, TTL 같은 실제 기능 확인용이고, 아래쪽은 file-backed source DB를 원본으로 둔 뒤
-          Mini Redis를 cache로 사용할 때의 응답 속도 차이를 실제 측정합니다.
+          Mini Redis를 cache로 사용할 때의 응답 속도 차이를 측정합니다.
         </p>
         <div class="status-grid">
           <div class="status-pill">
@@ -377,7 +377,6 @@
         </div>
         <ul>
           <li>이 페이지는 <code>ws://.../ws</code> 로 직접 연결됩니다.</li>
-          <li>명령은 현재 parser 제약상 공백 기준으로 분리되므로, value에는 공백을 넣지 않는 것이 안전합니다.</li>
           <li>benchmark는 실제 source DB 조회와 Mini Redis cache 조회를 모두 실행합니다.</li>
           <li>cache miss 시 source DB에서 읽고 Mini Redis에 저장한 뒤, 이후 요청은 cache hit로 처리합니다.</li>
         </ul>
@@ -425,7 +424,7 @@
         </div>
 
         <p class="hint">
-          Smoke scenario: <code>FLUSH → SET demo hello → GET demo → EXISTS demo → DEL demo → GET demo</code>
+          Smoke scenario: <code>FLUSH → SET hello → GET → EXISTS → DEL → GET </code>
         </p>
 
         <div class="terminal">
@@ -465,7 +464,6 @@
 
         <div class="button-row">
           <button id="run-benchmark">Run Benchmark</button>
-          <button id="load-samples" class="ghost">Reload Sample Keys</button>
         </div>
 
         <div class="metrics">
@@ -740,9 +738,6 @@
       });
     });
 
-    document.getElementById("load-samples").addEventListener("click", () => {
-      send({ action: "samples" });
-    });
 
     connect();
   </script>
