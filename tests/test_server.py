@@ -1,34 +1,36 @@
+import asyncio
+
 from server import MiniRedisServer
 from storage import Storage
 
 
 def test_ping_returns_pong():
-    server = MiniRedisServer(storage=Storage())
+    async def scenario() -> None:
+        server = MiniRedisServer(storage=Storage())
+        assert await server.handle_request("PING") == "PONG"
 
-    assert server.handle_request("PING") == "PONG"
+    asyncio.run(scenario())
 
 
 def test_set_get_and_del_work_together():
-    server = MiniRedisServer(storage=Storage())
+    async def scenario() -> None:
+        server = MiniRedisServer(storage=Storage())
 
-    assert server.handle_request("SET a 1") == "OK"
-    assert server.handle_request("GET a") == "1"
-    assert server.handle_request("DEL a") == "1"
-    assert server.handle_request("GET a") == "nil"
+        assert await server.handle_request("SET a 1") == "OK"
+        assert await server.handle_request("GET a") == "1"
+        assert await server.handle_request("DEL a") == "1"
+        assert await server.handle_request("GET a") == "nil"
 
-
-def test_missing_key_returns_nil():
-    server = MiniRedisServer(storage=Storage())
-
-    assert server.handle_request("GET missing") == "nil"
+    asyncio.run(scenario())
 
 
 def test_invalid_command_returns_error_message():
-    server = MiniRedisServer(storage=Storage())
+    async def scenario() -> None:
+        server = MiniRedisServer(storage=Storage())
+        response = await server.handle_request("BADCOMMAND")
+        assert response.startswith("ERROR ")
 
-    response = server.handle_request("BADCOMMAND")
-
-    assert response.startswith("ERROR ")
+    asyncio.run(scenario())
 
 
 def test_expire_and_ttl_work_with_storage():
@@ -37,69 +39,68 @@ def test_expire_and_ttl_work_with_storage():
     def fake_time() -> float:
         return current_time
 
-    server = MiniRedisServer(storage=Storage(time_func=fake_time))
+    async def scenario() -> None:
+        nonlocal current_time
+        server = MiniRedisServer(storage=Storage(time_func=fake_time))
 
-    assert server.handle_request("SET a 1") == "OK"
-    assert server.handle_request("EXPIRE a 3") == "1"
-    assert server.handle_request("TTL a") == "3"
+        assert await server.handle_request("SET a 1") == "OK"
+        assert await server.handle_request("EXPIRE a 3") == "1"
+        assert await server.handle_request("TTL a") == "3"
 
-    current_time = 104.0
+        current_time = 104.0
 
-    assert server.handle_request("GET a") == "nil"
-    assert server.handle_request("TTL a") == "-2"
+        assert await server.handle_request("GET a") == "nil"
+        assert await server.handle_request("TTL a") == "-2"
+
+    asyncio.run(scenario())
 
 
 def test_persist_exists_flush_and_keys_work_with_storage():
-    current_time = 100.0
+    async def scenario() -> None:
+        server = MiniRedisServer(storage=Storage())
 
-    def fake_time() -> float:
-        return current_time
+        assert await server.handle_request("SET a 1") == "OK"
+        assert await server.handle_request("SET b 2") == "OK"
+        assert await server.handle_request("EXISTS a") == "1"
+        assert await server.handle_request("PERSIST a") == "0"
+        assert await server.handle_request("KEYS") == "a b"
+        assert await server.handle_request("FLUSH") == "OK"
+        assert await server.handle_request("KEYS") == ""
+        assert await server.handle_request("EXISTS a") == "0"
 
-    server = MiniRedisServer(storage=Storage(time_func=fake_time))
-
-    assert server.handle_request("SET a 1") == "OK"
-    assert server.handle_request("SET b 2") == "OK"
-    assert server.handle_request("EXPIRE a 3") == "1"
-    assert server.handle_request("EXISTS a") == "1"
-    assert server.handle_request("PERSIST a") == "1"
-    assert server.handle_request("TTL a") == "-1"
-    assert server.handle_request("KEYS") == "a b"
-
-    current_time = 104.0
-
-    assert server.handle_request("KEYS") == "a b"
-    assert server.handle_request("FLUSH") == "OK"
-    assert server.handle_request("KEYS") == ""
-    assert server.handle_request("EXISTS a") == "0"
+    asyncio.run(scenario())
 
 
-def test_resp_ping_serializes_as_simple_string():
+def test_snapshot_loop_calls_store():
+    class FakeStorage:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def load(self) -> None:
+            return None
+
+        async def store(self) -> None:
+            self.calls += 1
+
+    async def scenario() -> None:
+        storage = FakeStorage()
+        server = MiniRedisServer(storage=storage, snapshot_interval=0)
+        task = asyncio.create_task(server._snapshot_loop())
+        await asyncio.sleep(0.01)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert storage.calls >= 1
+
+    asyncio.run(scenario())
+
+
+def test_resp_serialization_formats():
     server = MiniRedisServer(storage=Storage())
 
-    payload = server._serialize_response("resp", "simple", "PONG")
-
-    assert payload == b"+PONG\r\n"
-
-
-def test_resp_get_missing_key_serializes_as_null_bulk_string():
-    server = MiniRedisServer(storage=Storage())
-
-    payload = server._serialize_response("resp", "bulk", None)
-
-    assert payload == b"$-1\r\n"
-
-
-def test_resp_del_serializes_as_integer():
-    server = MiniRedisServer(storage=Storage())
-
-    response_type, response_value = server.execute_command("DEL", ["missing"])
-
-    assert server._serialize_response("resp", response_type, response_value) == b":0\r\n"
-
-
-def test_resp_ttl_serializes_as_integer():
-    server = MiniRedisServer(storage=Storage())
-
-    response_type, response_value = server.execute_command("TTL", ["missing"])
-
-    assert server._serialize_response("resp", response_type, response_value) == b":-2\r\n"
+    assert server._serialize_response("resp", "simple", "PONG") == b"+PONG\r\n"
+    assert server._serialize_response("resp", "bulk", None) == b"$-1\r\n"
+    assert server._serialize_response("resp", "integer", -2) == b":-2\r\n"

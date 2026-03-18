@@ -1,8 +1,9 @@
+import asyncio
 from io import BytesIO
 
 import pytest
 
-from parser import parse_command, parse_resp_command, read_request
+from parser import parse_command, parse_resp_command, read_request, read_request_async
 
 
 def test_parse_ping_command():
@@ -110,3 +111,27 @@ def test_read_request_detects_resp_protocol():
     request = read_request(BytesIO(b"*2\r\n$3\r\nGET\r\n$1\r\na\r\n"))
 
     assert request == ("resp", "GET", ["a"])
+
+
+def test_read_request_async_detects_inline_protocol():
+    async def scenario() -> None:
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"PING\n")
+        reader.feed_eof()
+
+        request = await read_request_async(reader)
+        assert request == ("inline", "PING", [])
+
+    asyncio.run(scenario())
+
+
+def test_read_request_async_detects_resp_protocol():
+    async def scenario() -> None:
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"*2\r\n$3\r\nGET\r\n$1\r\na\r\n")
+        reader.feed_eof()
+
+        request = await read_request_async(reader)
+        assert request == ("resp", "GET", ["a"])
+
+    asyncio.run(scenario())

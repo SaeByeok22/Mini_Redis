@@ -1,8 +1,17 @@
 # Mini Redis
 
-Python으로 만든 작은 Redis 스타일 TCP key-value 서버다.
+Python 3.11 표준 라이브러리만으로 만든 asyncio 기반 mini Redis 서버다.
 
-## 지원 기능
+## 현재 구현
+
+- `asyncio.start_server()` 기반 TCP 서버
+- inline 명령 + RESP 명령 처리
+- in-memory key-value 저장소
+- TTL (`EXPIRE`, `TTL`, `PERSIST`)
+- Snapshot + AOF 기반 영속성
+- `asyncio.Lock`으로 코루틴 간 DB 접근 보호
+
+## 지원 명령
 
 - `PING`
 - `SET key value`
@@ -10,34 +19,25 @@ Python으로 만든 작은 Redis 스타일 TCP key-value 서버다.
 - `DEL key`
 - `EXPIRE key seconds`
 - `TTL key`
+- `PERSIST key`
+- `EXISTS key`
+- `FLUSH`
+- `KEYS`
 
 ## 파일 역할
 
-- `storage.py`: 데이터 저장, 삭제, TTL 처리
-- `parser.py`: inline 명령과 RESP 명령 파싱
-- `server.py`: TCP 서버 실행, 요청 처리, 응답 전송
-- `client.py`: RESP 방식으로 서버에 명령 전송
-- `tests/`: storage, parser, server 테스트
+- `server.py`: asyncio TCP 서버
+- `storage.py`: 메모리 저장소, TTL, `asyncio.Lock`
+- `parser.py`: inline / RESP 파싱
+- `persistence.py`: snapshot 저장/로드, AOF append/replay
+- `client.py`: RESP 클라이언트
 
 ## 실행
 
-가상환경이 있으면 먼저 활성화한다.
-
 ```bash
+cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
 source /Users/gang-yeong-im/JUNGLE/.venv/bin/activate
-```
-
-프로젝트 의존성 설치:
-
-```bash
-cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
 python -m pip install -r requirements.txt
-```
-
-서버 실행:
-
-```bash
-cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
 python server.py
 ```
 
@@ -48,17 +48,9 @@ Mini Redis server listening on 127.0.0.1:6380
 Connect from another terminal: nc 127.0.0.1 6380
 ```
 
-중요:
-
-- `server.py`를 실행한 터미널에 `PING`를 직접 치는 방식은 동작하지 않는다.
-- 서버는 TCP 연결만 기다린다.
-- 명령은 반드시 다른 터미널에서 보내야 한다.
-
 ## 확인 방법
 
-### 1. 가장 쉬운 방법: `nc`
-
-다른 터미널에서:
+### inline 확인
 
 ```bash
 nc 127.0.0.1 6380
@@ -74,102 +66,62 @@ DEL a
 GET a
 ```
 
-예상 응답:
-
-```text
-PONG
-OK
-1
-1
-nil
-```
-
-이 방식은 사람이 직접 확인하기 쉬운 inline 문자열 모드다.
-
-### 2. RESP 방식 확인
-
-`client.py`를 쓰면 `redis-cli` 없이도 RESP로 바로 확인할 수 있다.
+### RESP 확인
 
 ```bash
-python client.py PING
-python client.py SET a 1
-python client.py GET a
-python client.py DEL a
-python client.py TTL a
+python client.py
 ```
 
-서버는 RESP 요청을 읽고 RESP 형식으로 응답한다.
-
-포트를 바꾸고 싶으면:
-
-```bash
-python client.py --port 6380 PING
-```
-
-`nc`는 inline 모드 확인용이고, `client.py`는 RESP 확인용이다.
-
-## 서버 종료
-
-서버를 실행한 터미널에서 `Control + C`
-
-정상 종료 시:
+입력:
 
 ```text
-Mini Redis server stopped.
+PING
+SET a 1
+GET a
 ```
 
-주의:
+## Persistence
 
-- `Command + C`는 macOS 터미널 복사 단축키라서 서버 종료 신호가 아니다.
-- 클라이언트 터미널에서 `Control + C`를 누르면 클라이언트만 닫힌다.
+서버는 `data/` 아래 파일을 사용한다.
+
+- snapshot: `data/snapshot.json`
+- AOF: `data/appendonly.aof`
+
+### Snapshot
+
+- 300초(5분)마다 백그라운드 태스크가 실행된다.
+- `asyncio.Lock`을 잡고 현재 메모리 상태를 복사한다.
+- lock을 푼 뒤 임시 파일에 저장하고 `os.replace()`로 교체한다.
+
+### AOF
+
+- `SET`, `DEL`, `EXPIREAT`, `PERSIST`, `FLUSH` 같은 변경 명령만 기록한다.
+- append 방식으로 파일 끝에 계속 추가한다.
+- 각 명령은 순서대로 기록된다.
+
+## 복구 순서
+
+서버 시작 시 아래 순서로 복구한다.
+
+1. snapshot 로드
+2. snapshot 안에 기록된 AOF offset 확인
+3. 그 offset 이후의 AOF만 replay
+4. 복구 완료 후 서버 시작
+
+즉 snapshot이 기준 상태가 되고, 그 이후 변경분만 AOF로 다시 반영한다.
+
+## 동기화
+
+- 공유 DB 접근: `asyncio.Lock`
+- snapshot 저장: copy 후 파일 write
+- 파일 I/O: `asyncio.to_thread()` 사용
+
+그래서 코루틴 여러 개가 들어와도 DB 상태가 꼬이지 않도록 막는다.
 
 ## 테스트
 
 ```bash
 cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
-python -m pip install -r requirements.txt
+source /Users/gang-yeong-im/JUNGLE/.venv/bin/activate
 python -m pytest -q
 ```
-
-## Homebrew와 redis-cli
-
-macOS에서 `redis-cli`를 쓰려면 보통 Homebrew가 필요하다.
-
-공식 Homebrew 설치 명령:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-설치 후:
-
-```bash
-brew install redis
-```
-
-주의:
-
-- Apple Silicon Mac에서는 기본 설치 위치가 `/opt/homebrew`다.
-- 이 경로 설치에는 macOS 관리자 권한이 필요할 수 있다.
-- 관리자 권한이 없으면 Homebrew 설치가 실패할 수 있다.
-
-## 자주 나오는 상황
-
-### `ERROR port 6380 is already in use.`
-
-이미 다른 프로세스가 6380 포트를 쓰는 중이다.
-
-확인:
-
-```bash
-lsof -nP -iTCP:6380 -sTCP:LISTEN
-```
-
-기존 프로세스를 종료한 뒤 다시 실행하면 된다.
-
-### `python storage.py`를 실행했는데 아무 반응이 없음
-
-정상이다.
-
-- `storage.py`는 실행 파일이 아니라 클래스 정의 파일이다.
-- 실제 실행 파일은 `server.py`다.

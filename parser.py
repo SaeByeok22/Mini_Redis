@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import BinaryIO, Literal
 
 
@@ -96,6 +97,72 @@ def read_request(client_file: BinaryIO) -> tuple[ProtocolType, str, list[str]] |
 
     if first_line.startswith(b"*"):
         command, args = parse_resp_command(client_file, first_line)
+        return "resp", command, args
+
+    request = first_line.decode("utf-8", errors="replace").rstrip("\r\n")
+    command, args = parse_command(request)
+    return "inline", command, args
+
+
+async def parse_resp_command_async(
+    reader: asyncio.StreamReader,
+    first_line: bytes,
+) -> tuple[str, list[str]]:
+    """Parse one RESP array command from an asyncio stream."""
+    header = _decode_line(first_line)
+    if not header.startswith("*"):
+        raise ParseError("RESP array expected")
+
+    try:
+        item_count = int(header[1:])
+    except ValueError as exc:
+        raise ParseError("invalid RESP array length") from exc
+
+    if item_count <= 0:
+        raise ParseError("RESP array must contain at least one item")
+
+    parts: list[str] = []
+    for _ in range(item_count):
+        length_line = await reader.readline()
+        if not length_line:
+            raise ParseError("incomplete RESP bulk string length")
+
+        length_header = _decode_line(length_line)
+        if not length_header.startswith("$"):
+            raise ParseError("RESP array items must be bulk strings")
+
+        try:
+            length = int(length_header[1:])
+        except ValueError as exc:
+            raise ParseError("invalid RESP bulk string length") from exc
+
+        if length < 0:
+            raise ParseError("RESP null bulk strings are not supported")
+
+        try:
+            data = await reader.readexactly(length)
+            line_end = await reader.readexactly(2)
+        except asyncio.IncompleteReadError as exc:
+            raise ParseError("incomplete RESP bulk string data") from exc
+
+        if line_end != b"\r\n":
+            raise ParseError("RESP bulk string must end with CRLF")
+
+        parts.append(data.decode("utf-8", errors="replace"))
+
+    return _validate_command(parts[0].upper(), parts[1:])
+
+
+async def read_request_async(
+    reader: asyncio.StreamReader,
+) -> tuple[ProtocolType, str, list[str]] | None:
+    """Read one inline or RESP request from an asyncio stream."""
+    first_line = await reader.readline()
+    if not first_line:
+        return None
+
+    if first_line.startswith(b"*"):
+        command, args = await parse_resp_command_async(reader, first_line)
         return "resp", command, args
 
     request = first_line.decode("utf-8", errors="replace").rstrip("\r\n")

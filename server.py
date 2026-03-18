@@ -1,137 +1,180 @@
-"""TCP server for the mini Redis MVP."""
+"""Async TCP server for the mini Redis MVP."""
 
 from __future__ import annotations
 
-import errno
-import socket
+import asyncio
+from pathlib import Path
 from typing import Protocol
 
-from parser import ParseError, ProtocolType, parse_command, read_request
+from parser import ParseError, ProtocolType, parse_command, read_request_async
+from persistence import PersistenceManager
 
 
 class StorageProtocol(Protocol):
-    """Shared storage interface used by the server layer."""
-
-    def set(self, key: str, value: str) -> str:
+    async def load(self) -> None:
         ...
 
-    def get(self, key: str) -> str | None:
+    async def store(self) -> None:
         ...
 
-    def delete(self, key: str) -> bool:
+    async def set(self, key: str, value: str) -> str:
         ...
 
-    def persist(self, key: str) -> bool:
+    async def get(self, key: str) -> str | None:
         ...
 
-    def exists(self, key: str) -> bool:
+    async def delete(self, key: str) -> bool:
         ...
 
-    def flush(self) -> None:
+    async def expire(self, key: str, seconds: int | float) -> bool:
         ...
 
-    def keys(self) -> list[str]:
+    async def ttl(self, key: str) -> int:
+        ...
+
+    async def persist(self, key: str) -> bool:
+        ...
+
+    async def exists(self, key: str) -> bool:
+        ...
+
+    async def flush(self) -> None:
+        ...
+
+    async def keys(self) -> list[str]:
         ...
 
 
 class MiniRedisServer:
-    """A small line-based TCP server that dispatches commands to storage."""
+    """Async line-based TCP server that dispatches commands to storage."""
 
-    def __init__(self, storage: StorageProtocol, host: str = "127.0.0.1", port: int = 6380):
+    def __init__(
+        self,
+        storage: StorageProtocol,
+        host: str = "127.0.0.1",
+        port: int = 6380,
+        snapshot_interval: int = 300,
+    ) -> None:
         self.storage = storage
         self.host = host
         self.port = port
-        self._sock: socket.socket | None = None
+        self.snapshot_interval = snapshot_interval
+        self._server: asyncio.AbstractServer | None = None
+        self._snapshot_task: asyncio.Task[None] | None = None
 
-    def serve_forever(self) -> None:
-        """Start the TCP server and handle one connection at a time."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind((self.host, self.port))
-            server_socket.listen()
-            self._sock = server_socket
-            self.host, self.port = server_socket.getsockname()
-            print(f"Mini Redis server listening on {self.host}:{self.port}")
-            print(f"Connect from another terminal: nc {self.host} {self.port}")
+    async def initialize(self) -> None:
+        await self.storage.load()
 
-            while True:
-                client_socket, _ = server_socket.accept()
-                with client_socket:
-                    self._handle_client(client_socket)
+    async def serve_forever(self) -> None:
+        await self.initialize()
+        self._server = await asyncio.start_server(self._handle_client, self.host, self.port)
 
-    def _handle_client(self, client_socket: socket.socket) -> None:
-        with client_socket.makefile("rwb") as client_file:
+        socket_names = self._server.sockets or []
+        if socket_names:
+            bound_host, bound_port = socket_names[0].getsockname()[:2]
+            self.host = str(bound_host)
+            self.port = int(bound_port)
+
+        print(f"Mini Redis server listening on {self.host}:{self.port}")
+        print(f"Connect from another terminal: nc {self.host} {self.port}")
+
+        self._snapshot_task = asyncio.create_task(self._snapshot_loop())
+
+        try:
+            async with self._server:
+                await self._server.serve_forever()
+        finally:
+            if self._snapshot_task is not None:
+                self._snapshot_task.cancel()
+                try:
+                    await self._snapshot_task
+                except asyncio.CancelledError:
+                    pass
+
+    async def _snapshot_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.snapshot_interval)
+            await self.storage.store()
+
+    async def _handle_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        protocol: ProtocolType = "inline"
+
+        try:
             while True:
                 try:
-                    parsed_request = read_request(client_file)
+                    parsed_request = await read_request_async(reader)
                 except ParseError as exc:
-                    client_file.write(self._serialize_error(str(exc), "inline"))
-                    client_file.flush()
+                    writer.write(self._serialize_error(str(exc), protocol))
+                    await writer.drain()
                     continue
 
                 if parsed_request is None:
                     break
 
                 protocol, command, args = parsed_request
-                response_type, response_value = self.execute_command(command, args)
-                client_file.write(
-                    self._serialize_response(protocol, response_type, response_value)
-                )
-                client_file.flush()
+                response_type, response_value = await self.execute_command(command, args)
+                writer.write(self._serialize_response(protocol, response_type, response_value))
+                await writer.drain()
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except ConnectionError:
+                pass
 
-    def handle_request(self, request: str) -> str:
-        """Convert a raw request string into a protocol response."""
+    async def handle_request(self, request: str) -> str:
+        """Execute one inline request without going through TCP."""
         try:
             command, args = parse_command(request)
         except ParseError as exc:
             return f"ERROR {exc}"
 
-        response_type, response_value = self.execute_command(command, args)
+        response_type, response_value = await self.execute_command(command, args)
         return self._format_inline_response(response_type, response_value)
 
-    def execute_command(self, command: str, args: list[str]) -> tuple[str, str | int | None]:
-        """Execute one already-parsed command and return a typed response."""
+    async def execute_command(self, command: str, args: list[str]) -> tuple[str, str | int | None]:
         if command == "PING":
             return "simple", "PONG"
 
         if command == "SET":
             key, value = args
-            return "simple", self.storage.set(key, value)
+            return "simple", await self.storage.set(key, value)
 
         if command == "GET":
-            return "bulk", self.storage.get(args[0])
+            return "bulk", await self.storage.get(args[0])
 
         if command == "DEL":
-            deleted = self.storage.delete(args[0])
+            deleted = await self.storage.delete(args[0])
             return "integer", 1 if deleted else 0
 
         if command == "EXPIRE":
-            return self._handle_expire(args)
+            return await self._handle_expire(args)
 
         if command == "TTL":
-            return self._handle_ttl(args)
+            return "integer", await self.storage.ttl(args[0])
 
         if command == "PERSIST":
-            persisted = self.storage.persist(args[0])
+            persisted = await self.storage.persist(args[0])
             return "integer", 1 if persisted else 0
 
         if command == "EXISTS":
-            exists = self.storage.exists(args[0])
+            exists = await self.storage.exists(args[0])
             return "integer", 1 if exists else 0
 
         if command == "FLUSH":
-            self.storage.flush()
+            await self.storage.flush()
             return "simple", "OK"
 
         if command == "KEYS":
-            return "bulk", " ".join(self.storage.keys())
+            return "bulk", " ".join(await self.storage.keys())
 
         return "error", f"unsupported command: {command}"
 
-    def _handle_expire(self, args: list[str]) -> tuple[str, str | int]:
-        if not hasattr(self.storage, "expire"):
-            return "error", "EXPIRE not supported"
-
+    async def _handle_expire(self, args: list[str]) -> tuple[str, str | int]:
         key, seconds_text = args
         try:
             seconds = int(seconds_text)
@@ -141,15 +184,8 @@ class MiniRedisServer:
         if seconds < 0:
             return "error", "EXPIRE seconds must be non-negative"
 
-        expired = self.storage.expire(key, seconds)  # type: ignore[attr-defined]
+        expired = await self.storage.expire(key, seconds)
         return "integer", 1 if expired else 0
-
-    def _handle_ttl(self, args: list[str]) -> tuple[str, int | str]:
-        if not hasattr(self.storage, "ttl"):
-            return "error", "TTL not supported"
-
-        ttl_value = self.storage.ttl(args[0])  # type: ignore[attr-defined]
-        return "integer", ttl_value
 
     def _format_inline_response(self, response_type: str, response_value: str | int | None) -> str:
         if response_type == "simple":
@@ -197,26 +233,36 @@ class MiniRedisServer:
 
 
 def create_default_server(host: str = "127.0.0.1", port: int = 6380) -> MiniRedisServer:
-    """Build a server using the project's Storage implementation."""
-    try:
-        from storage import Storage
-    except ImportError as exc:
-        raise RuntimeError("storage.py with a Storage class is required to run the server") from exc
+    from storage import Storage
 
-    return MiniRedisServer(storage=Storage(), host=host, port=port)
+    data_dir = Path(__file__).resolve().parent / "data"
+    persistence = PersistenceManager(
+        snapshot_path=str(data_dir / "snapshot.json"),
+        aof_path=str(data_dir / "appendonly.aof"),
+    )
+    storage = Storage(persistence=persistence)
+    return MiniRedisServer(storage=storage, host=host, port=port)
 
 
-def main() -> None:
+async def _main() -> None:
     server = create_default_server()
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nMini Redis server stopped.")
+        await server.serve_forever()
     except OSError as exc:
-        if exc.errno == errno.EADDRINUSE:
+        if exc.errno == 98:
+            print(f"ERROR port {server.port} is already in use.")
+            return
+        if exc.errno == 48:
             print(f"ERROR port {server.port} is already in use.")
             return
         raise
+
+
+def main() -> None:
+    try:
+        asyncio.run(_main())
+    except KeyboardInterrupt:
+        print("\nMini Redis server stopped.")
 
 
 if __name__ == "__main__":
