@@ -57,16 +57,16 @@ MINI REDIS 구현 5조 고윤서입니다. 발표를 시작하겠습니다!
 
 ## 5. 지원 명령
 
-- `PING`
-- `SET key value`
-- `GET key`
-- `DEL key`
-- `EXPIRE key seconds`
-- `TTL key`
-- `PERSIST key`
-- `EXISTS key`
-- `FLUSH`
-- `KEYS`
+- `PING` : 서버가 정상적으로 연결되어 있는지 확인합니다.
+- `SET key value` : 지정한 key에 value를 저장합니다.
+- `GET key` : 지정한 key에 저장된 값을 조회합니다.
+- `DEL key` : 지정한 key를 삭제합니다.
+- `EXPIRE key seconds` : 지정한 key에 TTL을 설정해 일정 시간 후 만료되도록 합니다.
+- `TTL key` : 해당 key의 남은 TTL을 조회합니다. 키가 없으면 `-2`, TTL이 없으면 `-1`을 반환합니다.
+- `PERSIST key` : 설정된 TTL을 제거하고 key를 계속 유지합니다.
+- `EXISTS key` : 해당 key가 현재 존재하는지 확인합니다. 존재하면 `1`, 없으면 `0`을 반환합니다.
+- `FLUSH` : 저장된 모든 데이터를 한 번에 삭제합니다.
+- `KEYS` : 현재 저장되어 있는 모든 key 목록을 조회합니다.
 
 ## 6. 기능 검증 결과
 
@@ -81,6 +81,23 @@ MINI REDIS 구현 5조 고윤서입니다. 발표를 시작하겠습니다!
 - RESP 클라이언트 테스트
 
 - snapshot 저장 / load / AOF replay 복구 테스트
+
+실행한 테스트 코드:
+
+```bash
+python -m pytest -q tests/test_parser.py
+python -m pytest -q tests/test_storage.py
+python -m pytest -q tests/test_server.py
+python -m pytest -q tests/test_client.py
+python -m pytest -q
+```
+
+테스트 파일 기준으로 보면:
+
+- `tests/test_parser.py` : inline / RESP 명령 파싱, 인자 개수 검증, 잘못된 명령 처리
+- `tests/test_storage.py` : `SET/GET/DEL`, TTL, `PERSIST`, `EXISTS`, `FLUSH`, `KEYS`, snapshot / AOF 복구
+- `tests/test_server.py` : 서버 명령 처리 결과와 응답 포맷 검증
+- `tests/test_client.py` : RESP 클라이언트 요청 / 응답 처리 검증
 
 실제로 확인한 항목:
 
@@ -99,8 +116,7 @@ MINI REDIS 구현 5조 고윤서입니다. 발표를 시작하겠습니다!
 서버를 실행합니다:
 
 ```bash
-cd /Users/gang-yeong-im/JUNGLE/Mini_Redis
-source /Users/gang-yeong-im/JUNGLE/.venv/bin/activate
+cd C:\krafton_jungle\mini_redis
 python server.py
 ```
 
@@ -121,6 +137,32 @@ TTL user:1
 ```
 
 이 시나리오는 "외부 클라이언트가 mini Redis API를 호출해서 세션이나 캐시 데이터를 저장하는 경우"에 해당한다.
+
+직접 명령을 한 번에 보내서 확인할 수도 있다:
+
+```bash
+python client.py PING
+python client.py SET user:1 kim
+python client.py GET user:1
+python client.py EXPIRE user:1 10
+python client.py TTL user:1
+```
+
+Storage 코드 단위로 확인하고 싶다면 아래처럼 바로 호출해 볼 수 있다:
+
+```python
+import asyncio
+from storage import Storage
+
+async def main():
+    storage = Storage()
+    print(await storage.set("user:1", "kim"))
+    print(await storage.get("user:1"))
+    print(await storage.exists("user:1"))
+    print(await storage.delete("user:1"))
+
+asyncio.run(main())
+```
 
 
 ## 8. 엣지 케이스 테스트
@@ -144,6 +186,34 @@ TTL user:1
 - AOF 파일이 없을 때도 안전하게 시작
 
 - 일부 파일이 깨져 있어도 빈 상태로 fallback 가능
+
+확인에 사용한 테스트 예시는 아래와 같다:
+
+```python
+import asyncio
+from storage import Storage
+
+async def edge_case_demo():
+    storage = Storage()
+
+    print(await storage.get("missing"))      # None
+    print(await storage.delete("missing"))   # False
+    print(await storage.exists("missing"))   # False
+
+    await storage.set("session:1", "token")
+    await storage.expire("session:1", 1)
+    await asyncio.sleep(1.1)
+    print(await storage.get("session:1"))    # None
+    print(await storage.ttl("session:1"))    # -2
+
+asyncio.run(edge_case_demo())
+```
+
+또는 pytest 기준으로는 아래 테스트로 검증했다:
+
+```bash
+python -m pytest -q tests/test_storage.py -k "ttl or persist or exists or flush or keys"
+```
 
 ### No Redis
 
