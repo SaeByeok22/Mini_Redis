@@ -17,6 +17,20 @@ def test_parse_set_command():
     assert args == ["a", "1"]
 
 
+def test_parse_get_command():
+    command, args = parse_command("GET a")
+
+    assert command == "GET"
+    assert args == ["a"]
+
+
+def test_parse_del_command():
+    command, args = parse_command("DEL a")
+
+    assert command == "DEL"
+    assert args == ["a"]
+
+
 def test_parse_command_ignores_extra_spaces():
     command, args = parse_command("  SET   a   1  ")
 

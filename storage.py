@@ -1,20 +1,20 @@
 import time
 from collections.abc import Callable
-from typing import Any
 
 
 class Storage:
     def __init__(self, time_func: Callable[[], float] | None = None) -> None:
         # Keep value data separate from expire metadata.
-        self._data: dict[str, Any] = {}
+        self._data: dict[str, str] = {}
         self._expires_at: dict[str, float] = {}
         self._time_func = time_func or time.monotonic
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: str) -> str:
         self._data[key] = value
         self._expires_at.pop(key, None)
+        return "OK"
 
-    def get(self, key: str) -> Any:
+    def get(self, key: str) -> str | None:
         # Return None when the key does not exist.
         self._purge_if_expired(key)
         return self._data.get(key)
