@@ -1,6 +1,6 @@
 # Mini Redis
 
-## 1. 어느 정도 구현했는가
+## 1. 어느 정도 구현했는지?
 
 - asyncio 기반 TCP 서버
 - inline 명령 + RESP 명령 처리
